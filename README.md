@@ -34,7 +34,7 @@ python scripts/convert_outputs_to_cache.py \
 All experiments can be run using python run_task.py. You may need to specify the following key arguments:
 
 - `--data_file`: Path to the data JSONL file. The data used in our paper is in `data` directory.
-- `--model_name`: Model name, choices=([`gpt-4-0613, gpt-3.5-turbo-0613, claude-2`]).
+- `--model_name`: Model name, choices=([`gpt-4-0613, gpt-3.5-turbo-0613, claude-2, Meta-Llama-3-8B-Instruct, Meta-Llama-3-70B-Instruct`]).
 - `--task_name`: Task name, choices=([`acre, scan, list_function, arc`]).
 - `--output_file`: Path for the output JSON filed.
 - `--method`: Method, choices=([`rule, io`]).
@@ -47,6 +47,17 @@ All experiments can be run using python run_task.py. You may need to specify the
 - `--n_test`: Number of unseen examples for each task.
 - `--cache_file`: Path to the cache file. It should be the same as the one used in `scripts/convert_outputs_to_cache.py`. Default to `${output_dir}/query_cache.pkl` if not specified.
 - `--history_file`: Path to the history file that will be used to store the history of interactions with the model. Default to `${output_dir}/history.jsonl` if not specified.
+
+For running Meta-Llama-3-8B-Instruct and Meta-Llama-3-70B-Instruct, you should install [vllm](https://docs.vllm.ai/en/latest/getting_started/installation.html), and `opanai==1.35`.
+
+You should first deploy the Meta-Llama-3-8B-Instruct or Meta-Llama-3-70B-Instruct model
+```bash
+# For Meta-Llama-3-70B-Instruct 2 A100 80G
+python -m vllm.entrypoints.openai.api_server --model Meta-Llama-3-70B-Instruct --tensor-parallel-size 2
+# For Meta-Llama-3-8B-Instruct 2 A100 80G
+python -m vllm.entrypoints.openai.api_server --model Meta-Llama-3-8B-Instruct --tensor-parallel-size 2
+```
+The follow the steps below:
 
 To run experiments using iterative hypothesis refinement:
 ```bash

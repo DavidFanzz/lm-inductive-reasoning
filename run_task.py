@@ -176,7 +176,7 @@ def main():
         verbose=args.verbose,
         eval_every=args.eval_every,
     )
-    import pdb; pdb.set_trace()
+    # import pdb; pdb.set_trace()
     output_dict = task.run()
     logger.info(f"Total cost: {task.cost}")
 
