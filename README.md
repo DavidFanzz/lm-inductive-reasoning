@@ -54,8 +54,8 @@ You should first deploy the Meta-Llama-3-8B-Instruct or Meta-Llama-3-70B-Instruc
 ```bash
 # For Meta-Llama-3-70B-Instruct 2 A100 80G
 python -m vllm.entrypoints.openai.api_server --model Meta-Llama-3-70B-Instruct --tensor-parallel-size 2
-# For Meta-Llama-3-8B-Instruct 2 A100 80G
-python -m vllm.entrypoints.openai.api_server --model Meta-Llama-3-8B-Instruct --tensor-parallel-size 2
+# For Meta-Llama-3-8B-Instruct 1 A100 80G
+python -m vllm.entrypoints.openai.api_server --model Meta-Llama-3-8B-Instruct
 ```
 The follow the steps below:
 
