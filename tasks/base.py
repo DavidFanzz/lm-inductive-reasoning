@@ -123,6 +123,7 @@ class Task:
         return rule
 
     def get_histories(self, idxs):
+        import pdb; pdb.set_trace()
         histories = []
         for i in idxs:
             history = self.histories[i]

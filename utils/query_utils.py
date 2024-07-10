@@ -5,14 +5,14 @@ import os
 import pickle
 from math import ceil
 from random import random
-
+import time
 import anthropic
 import openai
 import tiktoken
 from tqdm import tqdm
 from tqdm.asyncio import tqdm_asyncio
 
-openai.api_key = os.environ["OPENAI_API_KEY"]
+# openai.api_key = os.environ["OPENAI_API_KEY"]
 ANTHROPIC_CLIENT = anthropic.AsyncAnthropic()
 
 HISTORY_FILE = "history.jsonl"
@@ -30,10 +30,12 @@ MODEL2BATCH_SIZE = {
     "gpt-3.5-turbo-0613": 500,
     "gpt-4-0613": 500,
     "claude-2": 100,
+    "Meta-Llama-3-8B-Instruct": 500,
 }
 
 GPT_MODELS = {"gpt-3.5-turbo-0613", "gpt-4-0613"}
 CLAUDE_MODELS = {"claude-2"}
+VLLM_MODELS = {"Meta-Llama-3-8B-Instruct", "Meta-Llama-3-70B-Instruct"}
 
 
 async def query_openai(
@@ -153,6 +155,75 @@ async def query_anthropic(
             else:
                 await asyncio.sleep(wait_time)
 
+async def query_vllm(
+    prompt,
+    model_name,
+    system_msg,
+    history,
+    max_tokens=None,
+    temperature=0,
+    retry=100,
+    n=1,
+    history_file=HISTORY_FILE,
+    **kwargs,  
+):
+    # import pdb; pdb.set_trace()
+    # reference: https://github.com/ekinakyurek/mylmapis/blob/b0adb192135898fba9e9dc88f09a18dc64c1f1a9/src/network_manager.py
+    messages = []
+    if system_msg is not None:
+        messages += [{"role": "system", "content": system_msg}]
+    if history is not None:
+        messages += history
+    messages += [{"role": "user", "content": prompt}]
+    if max_tokens is not None:
+        kwargs["max_tokens"] = max_tokens
+    kwargs["temperature"] = temperature
+    kwargs["n"] = n
+
+    for i in range(retry + 1):
+        wait_time = (1 << min(i, EXP_CAP)) + random() / 10
+        # try:
+        if True:
+            from openai import OpenAI
+            openai_api_key = "EMPTY"
+            openai_api_base = "http://localhost:8000/v1"
+
+            client = OpenAI(
+                api_key=openai_api_key,
+                base_url=openai_api_base,
+            )
+
+            response = client.chat.completions.create(
+                model=model_name, messages=messages, **kwargs
+            )
+            with open(history_file, "a") as f:
+                f.write(json.dumps((model_name, kwargs, response)) + "\n")
+            if any(choice["finish_reason"] != "stop" for choice in response["choices"]):
+                print("Truncated response!")
+                print(response)
+            contents = [choice["message"]["content"] for choice in response["choices"]]
+            if n == 1:
+                return contents[0]
+            else:
+                return contents
+        # except (
+        #     openai.error.APIError,
+        #     openai.error.TryAgain,
+        #     openai.error.Timeout,
+        #     openai.error.APIConnectionError,
+        #     openai.error.ServiceUnavailableError,
+        #     openai.error.RateLimitError,
+        # ) as e:
+        #     if i == retry:
+        #         raise e
+        #     else:
+        #         time.sleep(wait_time)
+        # except openai.error.InvalidRequestError as e:
+        #     logger.error(e)
+        #     if n == 1:
+        #         return ""
+        #     else:
+        #         return [""] * n
 
 def query_batch_wrapper(
     fn, prompts, model_name, system_msg, histories, *args, **kwargs
@@ -211,6 +282,7 @@ def query_batch(
             history_cache_key = tuple([tuple(e.items()) for e in his]) if his else None
             prompt_key = prompt if isinstance(prompt, str) else tuple(prompt)
             unseen_prompt_pairs.add((prompt_key, history_cache_key))
+    import pdb; pdb.set_trace()
     unseen_prompts = []
     unseen_histories = []
     for prompt, his in unseen_prompt_pairs:
@@ -239,6 +311,20 @@ def query_batch(
             if model_name in GPT_MODELS:
                 responses = query_batch_wrapper(
                     query_openai,
+                    unseen_prompts_batch,
+                    model_name,
+                    system_msg,
+                    unseen_histories_batch,
+                    max_tokens,
+                    temperature,
+                    retry,
+                    n,
+                    history_file,
+                    **openai_kwargs,
+                )
+            elif model_name in VLLM_MODELS:
+                responses = query_batch_wrapper(
+                    query_vllm,
                     unseen_prompts_batch,
                     model_name,
                     system_msg,

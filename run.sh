@@ -1,8 +1,8 @@
 export OPENAI_API_KEY=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
 data_file=./data/list_function.jsonl
-model_name=gpt-4-0613
+model_name=Meta-Llama-3-8B-Instruct
 task=list_function
-output_file=./outputs/gpt_list_function_io.jsonl
+output_file=./new_outputs/gpt_list_function_io.jsonl
 iter=3
 t=0.7
 n=5
