@@ -14,6 +14,7 @@ from tqdm.asyncio import tqdm_asyncio
 import transformers
 from vllm import LLM, SamplingParams
 import numpy as np
+import torch
 
 # openai.api_key = os.environ["OPENAI_API_KEY"]
 # ANTHROPIC_CLIENT = anthropic.AsyncAnthropic()
@@ -39,6 +40,7 @@ MODEL2BATCH_SIZE = {
 GPT_MODELS = {"gpt-3.5-turbo-0613", "gpt-4-0613"}
 CLAUDE_MODELS = {"claude-2"}
 VLLM_MODELS = {"Meta-Llama-3-8B-Instruct", "Meta-Llama-3-70B-Instruct"}
+TRANSFORMERS_MODELS = {"Meta-Llama-3-8B-Instruct", "Meta-Llama-3-70B-Instruct"}
 
 GLOBAL_VLLM_MODEL = None
 GLOBAL_TRANSFORMERS_MODEL = None
@@ -206,8 +208,53 @@ async def query_vllm(
             return contents[0]
         else:
             return contents
+        
+async def query_transformers_model_direct(
+    prompt,
+    model_name,
+    system_msg,
+    history,
+    max_tokens=None,
+    temperature=0,
+    retry=100,
+    n=1,
+    history_file=HISTORY_FILE,
+    **kwargs,  
+):
+    # reference: https://github.com/ekinakyurek/mylmapis/blob/b0adb192135898fba9e9dc88f09a18dc64c1f1a9/src/network_manager.py
+    messages = []
+    if system_msg is not None:
+        messages += [{"role": "system", "content": system_msg}]
+    if history is not None:
+        messages += history
+    messages += [{"role": "user", "content": prompt}]
+    if max_tokens is not None:
+        kwargs["max_tokens"] = max_tokens
+    kwargs["temperature"] = temperature
+    kwargs["n"] = n
+    terminators = [
+        GLOBAL_TRANSFORMERS_MODEL.tokenizer.eos_token_id,
+        GLOBAL_TRANSFORMERS_MODEL.tokenizer.convert_tokens_to_ids("<|eot_id|>")
+    ]
 
-def query_model_direct(
+    outputs = GLOBAL_TRANSFORMERS_MODEL(
+        messages,
+        max_new_tokens=max_tokens,
+        eos_token_id=terminators,
+        do_sample=True if temperature != 0 else False,
+        temperature=temperature,
+        num_return_sequences=n
+    )
+
+    with open(history_file, "a") as f:
+        f.write(json.dumps((model_name, messages, kwargs, outputs)) + "\n")
+    contents = [output['generated_text'][-1]['content'] for output in outputs]
+    if n == 1:
+        return contents[0]
+    else:
+        return contents
+        
+def query_vllm_model_direct(
     prompt,
     model_name,
     system_msg,
@@ -245,6 +292,44 @@ def query_model_direct(
     else:
         return np.array(responses).reshape(len(responses) // n, n)
 
+# def query_transformers_model_direct(
+#     prompt,
+#     model_name,
+#     system_msg,
+#     history,
+#     max_tokens=None,
+#     temperature=0,
+#     retry=100,
+#     n=1,
+#     history_file=HISTORY_FILE,
+#     **kwargs, 
+# ):  
+#     if max_tokens is not None:
+#         kwargs["max_tokens"] = max_tokens
+#     kwargs["temperature"] = temperature
+#     kwargs["n"] = n
+#     messages = []
+#     for _ in range(len(prompt)):
+#         message = []
+#         if system_msg is not None:
+#             message += [{"role": "system", "content": system_msg}]
+#         if history[_] is not None:
+#             message += history[_]
+#         message += [{"role": "user", "content": prompt[_]}]
+#         for __ in range(n):
+#             messages.append(message)
+#     prompts = [GLOBAL_TOKENIZER.apply_chat_template(_, tokenize=False) for _ in messages]
+#     sampling_params = SamplingParams(temperature=temperature, max_tokens=max_tokens)
+#     responses = GLOBAL_VLLM_MODEL.generate(prompts, sampling_params)
+#     responses = [_.outputs[0].text.replace("<|start_header_id|>assistant<|end_header_id|>\n\n", "") for _ in responses]
+#     with open(history_file, "a") as f:
+#         for _ in range(len(prompt)):
+#             f.write(json.dumps((model_name, messages[_ * n], kwargs, responses[_])) + "\n")
+#     if n == 1:
+#         return responses
+#     else:
+#         return np.array(responses).reshape(len(responses) // n, n)
+    
 def init_global_vllm_model(
     model_name,
     tensor_parallel_size
@@ -253,12 +338,17 @@ def init_global_vllm_model(
     GLOBAL_VLLM_MODEL = LLM(model=model_name, tensor_parallel_size=tensor_parallel_size)
     GLOBAL_TOKENIZER = transformers.AutoTokenizer.from_pretrained(model_name)
 
-# def init_global_transformers_model(
-#     model_name,
-# )
-#     global GLOBAL_TRANSFORMERS_MODEL, GLOBAL_TOKENIZER
-#     GLOBAL_VLLM_MODEL = LLM(model=model_name, tensor_parallel_size=tensor_parallel_size)
-#     GLOBAL_TOKENIZER = transformers.AutoTokenizer.from_pretrained(model_name)
+def init_global_transformers_model(
+    model_name,
+):
+    global GLOBAL_TRANSFORMERS_MODEL, GLOBAL_TOKENIZER
+    GLOBAL_TRANSFORMERS_MODEL = transformers.pipeline(
+        "text-generation",
+        model=model_name,
+        model_kwargs={"torch_dtype": torch.bfloat16},
+        device_map="auto",
+    )
+    GLOBAL_TOKENIZER = transformers.AutoTokenizer.from_pretrained(model_name)
 
 def query_batch_wrapper(
     fn, prompts, model_name, system_msg, histories, *args, **kwargs
@@ -344,8 +434,23 @@ def query_batch(
         ):
             unseen_prompts_batch = unseen_prompts[start : start + batch_size]
             unseen_histories_batch = unseen_histories[start : start + batch_size]
-            if GLOBAL_VLLM_MODEL != None:
-                responses = query_model_direct(
+            
+            if GLOBAL_TRANSFORMERS_MODEL != None:
+                responses = query_batch_wrapper(
+                    query_transformers_model_direct,
+                    unseen_prompts_batch,
+                    model_name,
+                    system_msg,
+                    unseen_histories_batch,
+                    max_tokens,
+                    temperature,
+                    retry,
+                    n,
+                    history_file,
+                    **openai_kwargs,
+                )
+            elif GLOBAL_VLLM_MODEL != None:
+                responses = query_vllm_model_direct(
                     unseen_prompts_batch,
                     model_name,
                     system_msg,

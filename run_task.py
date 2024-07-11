@@ -7,7 +7,7 @@ from tasks.arc import ARC
 from tasks.list_function import ListFunction
 from tasks.scan import SCAN
 from utils.io_utils import read_jsonl, write_json
-from utils.query_utils import CACHE_FILE, HISTORY_FILE
+from utils.query_utils import CACHE_FILE, HISTORY_FILE, init_global_vllm_model, init_global_transformers_model
 
 
 def parse_args():
@@ -114,6 +114,16 @@ def parse_args():
         default=-1,
         help="Evaluate every n iterations.",
     )
+    parser.add_argument(
+        "--tensor_parallel_size",
+        type=int,
+        default=-1,
+        help="Evaluate every n iterations.",
+    )
+    parser.add_argument(
+        "--use_transformers",
+        action='store_true',
+    )
     return parser.parse_args()
 
 
@@ -136,6 +146,9 @@ class MessageFilter(logging.Filter):
 
 def main():
     args = parse_args()
+    if args.use_transformers:
+        # init_global_vllm_model(args.model_name, args.tensor_parallel_size)
+        init_global_transformers_model(args.model_name)
     openai_logger = logging.getLogger("openai")
     openai_logger.addFilter(MessageFilter())
     openai_logger.setLevel(logging.WARNING)
